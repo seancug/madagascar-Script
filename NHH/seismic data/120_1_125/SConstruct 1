@@ -1,0 +1,115 @@
+from rsf.proj import *
+
+File = 'NHH_t'
+numofslice = 48
+Flow([File, File+'_hdr', File+'.asc', File+'.bin'], '1.sgy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+# # Flow([File, 'tshots'],'./trace_bal/gainm.su',
+# #        '''suread su=y endian=n tfile=${TARGETS[1]}''')
+
+# #graph title="Average Spectra" grid1=y grid2=y min1=0 max1=150 max2=0.2 label2=Amp screenratio=0.4
+# # Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfwiggle  screenht=15.0 screenratio=1.5 transp=y yreverse=y plotcol=7 
+# # 	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+# # 	labelsz=4. wheretitle=bottom titlesz=8.0''')| scale axis=1
+
+# Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfwiggle perc=99 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+# 	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+# 	labelsz=4. wheretitle=bottom titlesz=8.0''')
+# #Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfgrey color=seismic screenratio=3.5''')
+
+# Result('spectra_raw',File,
+#        '''window min2=1 max2=64 max1=0.8|spectra all=y|scale axis=1|graph title="Average Spectra" plotfat=2 grid1=y 
+#        griddash=2 grid2=y min1=0 min2=0 max1=1000 label2=Amp screenratio=0.4''')
+
+# Result('area_spec_f',File,'''window min2=1 max2=64 max1=0.8|bandpass flo=5|agc rect1=100|sfwiggle perc=99 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+# 	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+# 	labelsz=4. wheretitle=bottom titlesz=8.0''')
+
+# Result('spectra_f',File,
+#        '''window min2=1 max2=64 max1=0.8|bandpass flo=5|spectra all=y|scale axis=1| graph title="Average Spectra" plotfat=2 grid1=y 
+#        griddash=2 grid2=y min1=0 min2=0 max1=1000 label2=Amp screenratio=0.4''')
+
+# Flow('spectra_f',File,
+#        '''window min2=1 max2=64 max1=0.8|bandpass flo=5|spectra all=y|scale axis=1''')
+
+#badndpass and sort the shot , window the data, gain the data
+Flow('bpss',File,'bandpass flo=5 fhi=600')
+
+Flow('hmask', File+'_hdr', 'sfheadermath output=fldr|mask min=3')
+Flow('win_hdr',[File+'_hdr', 'hmask'],'sfheaderwindow mask=${SOURCES[1]}')
+
+# # #test intbin
+# Flow('tb', ['bpss','win_hdr','hmask'], '''sfheaderwindow mask=${SOURCES[2]} |intbin head=${SOURCES[1]} xk=tracf yk=fldr put d2=3.125 o2=12.5 unit2='m'
+#       label2='offset' d3=12.5 03=0.0 unit3='m' ''')
+# Flow('rtb', ['tb','win_hdr'], 'intbin head=${SOURCES[1]} inv=y xk=tracf yk=fldr')
+
+#trace Balance
+prog = Program('trace_balance.c')
+Flow('shots',['bpss', 'win_hdr', '%s' % prog[0], 'hmask'],'''headerwindow mask=${SOURCES[3]} |intbin head=${SOURCES[1]} xk=tracf yk=fldr|put d2=3.125 o2=12.5 unit2='m' label2='offset'
+	 d3=12.5 03=0.0 unit3='m' | ./${SOURCES[2]} mbal=1''')
+#first look
+for i in range(numofslice):
+	num = (i + 1) * 10
+	Result(str(num), 'shots', '''window n3=1 min3=%g|pow pow1=1.4|sfwiggle pclip=96 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+		title="shot num %g" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+		labelsz=4. wheretitle=bottom titlesz=8.0''' % (num, num))
+
+#near offset section view ch3
+Flow('ch3','shots','window n2=1 f2=3|pow pow1=1.4')
+Plot('ch3', '''grey pclip=96 color=seismic title="Chanel 3 Offset section" ''')
+
+#FK analysis
+# step1 Select one shot (fldr)
+v1=1500
+v2=2200
+Flow('oneshot','shots','''window n3=1 min3=300 squeeze=n''')
+Plot('oneshot',' window max1=0.5 | grey color=seismic title="Selected Shot" pclip=96')
+
+Flow('fft','oneshot','fft1 | fft3')
+Plot('fft',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey allpos=y color=spectral title="FFT" 
+       ''')
+
+Flow('dipfilter', 'fft', 'sfdipfilter v1=%.1f v2=%.1f v3=%.1f v4=%.1f pass=n' % (-v2, -v1, v1, v2))
+Plot('dipfilter',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey color=spectral allpos=y title="Filtered" 
+       ''')
+Result('fk','fft dipfilter','SideBySideAniso')
+
+Flow('signal','dipfilter','fft3 inv=y | fft1 inv=y')
+Plot('signal',' window max1=0.5 | grey color=seismic title=Signal pclip=96')
+
+Flow('noise','oneshot signal','add scale=1,-1 ${SOURCES[1]}')
+Plot('noise',' window max1=0.5 | grey color=seismic title=Noise pclip=96')
+
+Result('fkcp','oneshot signal noise','SideBySideAniso')
+
+#FK apply all data
+Flow('ffts','shots','fft1 | fft3')
+Flow('fshots', 'ffts', 'sfdipfilter v1=%.1f v2=%.1f v3=%.1f v4=%.1f pass=n |fft3 inv=y | fft1 inv=y' % (-v2, -v1, v1, v2))
+
+#caculate cdp
+Flow('cdp','win_hdr','''headermath key=cdp output=5*fldr-5+tracf''')
+# Extract CMPs and apply t^2 gain
+Flow('rshots',['fshots','win_hdr'],
+     '''
+      intbin head=${SOURCES[1]} inv=y 
+      xk=tracf yk=fldr                   | 
+      pow pow1=1.4     
+      ''')
+Flow('cmps',['rshots','cdp'],'intbin head=${SOURCES[1]} xk=tracf yk=cdp')
+
+Flow('cmask','cmps','mul $SOURCE | stack axis=1 | mask min=1e-10')
+
+Result('cmask',
+       '''
+       dd type=float |
+       stack axis=1 norm=n |
+       graph symbol=x title="NHH"
+       label2="Traces per CMP Gather"
+       label1="CMP Gather Number" unit1=
+       ''')

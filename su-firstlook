@@ -1,0 +1,109 @@
+from rsf.suproj import *
+
+#read segyfile
+file='1'
+Flow([file, file + 'bin', file + 'asci'], 
+	file + '.sgy','''segyread verbose=1 endian=%d
+	bfile=${TARGETS[1]} hfile=${TARGETS[2]} 
+	tape=${SOURCE} | segyclean | suwind tmax=1.2'''% (1 - little_endian()), stdin=0)
+
+#set geometry,filter high pass
+Flow(file + '_filter', file, '''sushw key=offset,sx,gx,tracl 
+	a=13,0,12,1 b=3,0,3,1 c=0,12,12,0 j=48,48,48,0 | 
+	suchw key1=cdp key2=sx key3=gx b=1 c=1 d=3 |
+	subfilt hicut=0 fstoplo=3 fpasslo=6''')
+
+Flow('image-60.eps', file + '_filter', '''suwind key=fldr min=60 max=60 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Energy 1200J" label1="sec" label2="trace number"''')
+
+Flow('image-423.eps', file + '_filter', '''suwind key=fldr min=423 max=423 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Energy 2100J" label1="sec" label2="trace number"''')
+
+Flow('image-583.eps', file + '_filter', '''suwind key=fldr min=583 max=583 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Energy 3300J" label1="sec" label2="trace number"''')
+
+Flow('image-710.eps', file + '_filter', '''suwind key=fldr min=710 max=710 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Energy 4800J" label1="sec" label2="trace number"''')
+
+#offset 12.5
+Flow('offset-1003.eps', file + '_filter', '''suwind key=fldr min=1003 max=1003 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Offset 12.5m" label1="sec" label2="trace number"''')
+
+Flow('offset-710.eps', file + '_filter', '''suwind key=fldr min=710 max=710 | 
+	suwind tmin=0.01 tmax=0.15 | supswigb perc=92 f2=1 
+	title="Offset 25m" label1="sec" label2="trace number"''')
+
+#fft
+Flow('60', file + '_filter', '''suwind key=fldr min=60 max=60 | 
+	suwind tmin=0.01 tmax=0.3''')
+
+Flow('423', file + '_filter', '''suwind key=fldr min=423 max=423 | 
+	suwind tmin=0.01 tmax=0.3''')
+
+Flow('583', file + '_filter', '''suwind key=fldr min=583 max=583 | 
+	suwind tmin=0.01 tmax=0.3''')
+
+Flow('710', file + '_filter', '''suwind key=fldr min=710 max=710 | 
+	suwind tmin=0.01 tmax=0.3''')
+
+Flow('offset-1003', file + '_filter', '''suwind key=fldr min=1003 max=1003 | 
+	suwind tmin=0.01 tmax=0.3''')
+#boat nois
+Flow('boat-662.eps', file + '_filter', '''suwind key=fldr min=662 max=662 | 
+	suwind tmin=0.01 tmax=0.3 | supswigb perc=88 f2=1 
+	title="Boat Noise" label1="sec" label2="trace number"''')
+
+Flow('boat-665.eps', file + '_filter', '''suwind key=fldr min=665 max=665 | 
+	suwind tmin=0.01 tmax=0.3 | supswigb perc=88 f2=1 
+	title="Boat Noise" label1="sec" label2="trace number"''')
+#Flow('FK-60', file + '_filter', '''suwind key=fldr min=60 max=60 | suwind tmin=0.01 tmax=0.15|sufft | suamp mode=amp''')
+
+# Flow('pef', file + '_filter', '''sumute par=mupute.pick key=tracf |sugain tpow=1.0''')
+
+# #FK analysis
+# Flow('FK', 'pef', '''suwind tracf count=48 | suspecfk dx=3.125 dt=0.00025''')
+# # I see no noise for velfilt.  may need 51 ms delay, decon, and radon
+
+
+# Flow('cdps', 'pef',
+#   '''susort cdp fldr''')
+
+# #Flow('vbrute.txt','iva.sh vbrutein.txt cdps',
+# #     '''
+# #     ./iva.sh
+# #     "cmp1=100 cmp2=200 cmp3=300 cmp4=400 cmp5=500 cmp6=600
+# #	cmp7=700 cmp8=800 numCMPs=8" 
+# #     ${SOURCES[2]} ${TARGETS[0]} ${SOURCES[1]} 1500 20
+#  #    ''',stdout=0,stdin=0)
+
+# Flow('stack','cdps vbrutein.txt',
+#     '''
+#      sunmo 
+#        par=${SOURCES[1]}
+#      | sustack 
+#         key=cdp 
+#         normpow=1 
+#      ''')
+
+# #Result('stack','stack',
+#    #    '''
+#   #     suximage title="stack" f2=838 perc=90
+#  #      ''')
+
+# #Flow('stkvel1.intp2.bin','010_Velocity_Interp_IVA.sh',
+#  #    '''
+# #     ./010_Velocity_Interp_IVA.sh
+# #     ''')
+
+# #Result('vfile','stkvel1.intp2.bin',
+# #       '''
+# #       ximage n1=3071 d1=.004 f2=838 d2=1 cmap=rgb11 
+#  #         wclip=1300 bclip=3000
+# #       ''')
+
+End()

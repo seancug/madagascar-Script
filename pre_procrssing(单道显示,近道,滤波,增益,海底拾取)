@@ -1,0 +1,97 @@
+from rsf.proj import *
+import commands as cmd
+
+Flow(['403', '403'+'_hdr', '403'+'.asc', '403'+'.bin'], 'cant12.403.segy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+#mask bad trace
+mask='mask_403'
+Flow(mask, '403'+'_hdr', 'sfwindow n1=1 f1=7|sfmask max=2')
+
+#extract the header
+Flow('403_hdr_m', ['403_hdr', mask], '''sfheaderwindow mask=${SOURCES[1]}''')
+
+#extract the trace and sort the trace
+Flow('shots', ['403', mask, '403_hdr_m'], '''sfheaderwindow mask=${SOURCES[1]}|
+	sfintbin head=${SOURCES[2]} xk=tracf yk=fldr | 
+	sfput d2=12.5 o2=29.25 unit2='m' label2='offset' 
+	      d3=12.5          unit3='m' label3='shot' |sfreverse which=2 opt=i''')
+
+####exreact single shot important######################
+Flow('single', 'shots', '''sfwindow f3=12.5 n3=1|
+	sfput d2=1.0 o2=1.0 unit2='num' label2='trace' ''')
+#######################################################
+
+#####print single shot important#######################
+Plot("single", '''sfwiggle screenht=15.0 screenratio=1.5 transp=y yreverse=y plotcol=7 title="shot" 
+	plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+	labelsz=4. wheretitle=bottom titlesz=8.0''')
+#######################################################
+#Flow(None, None, 'vpconvert single.vpl format=eps')
+#print cmd.getstatusoutput('vpconvert single.vpl format=pdf')
+
+
+# Passband filter the data and pow
+Flow('shot0','shots',
+     '''
+     sfbandpass flo=20 fhi=180 
+     | sfpow pow1=2
+     ''', split=[3,486])
+
+
+##################
+# common offset
+##################
+Flow('near_offset','shot0','sfwindow n2=1')
+Plot('near_offset','sfgrey color=seismic title="Near Offset section"')
+
+Flow('far_offset','shot0','window n2=1 f2=119')
+Plot('far_offset','sfgrey color=seismic title="Near Offset section"')
+
+###############################
+# Pick Sea Floor for near offset
+################################
+Flow('window','near_offset','sfwindow min1=.01 max1=1.7')
+
+Flow('pick','window',
+     '''sfenvelope | sftransp| sfpick smooth=n vel0=1.57
+     ''')
+
+
+Plot('window','sfgrey color=seismic')
+
+Plot('pick','sfgraph plotcol=1 plotfat=2 yreverse=y min2=.01 max2=1.7 pad=n wanttitle=n wantaxis=n')
+
+Plot('pick0','pick','sfgraph plotcol=1 plotfat=2 yreverse=y min2=0 max2=3 pad=n wanttitle=n wantaxis=n')
+
+# sea floor overlayed over the windowed time samples
+Result('sf','window.vpl pick.vpl','Overlay')
+
+# sea floor overlayed over the near offset section
+Result('sfbig','near_offset.vpl pick0.vpl','Overlay')
+
+#################################
+# create mute for above sea floor
+#################################
+
+Flow('mute','pick',
+     '''
+     sfspray axis=1 n=120 d=12.5 o=29.25 label=Offset unit=m
+     | sfspray axis=1 n=3000  d=.001 o=0 label=time unit=s
+     | sfmath output="input-x1-.03"
+     | sfmask max=0
+     | sfdd type=float
+     | sfsmooth rect1=7 rect2=5
+     | sfnmostretch inv=y half=n v0=1500
+     ''')
+#     ''',split=[1,'omp'],reduce="cat axis=3",np=10)
+#     ''',split=[1,ns],reduce="cat axis=3")
+
+mute='mute'
+# apply mute above sea floor
+############################
+
+Flow('shot_m', ['shot0', mute],
+     '''
+   	 sfmul ${SOURCES[1]}
+     ''')
+End()

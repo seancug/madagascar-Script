@@ -1,0 +1,143 @@
+from rsf.proj import *
+
+File = 'NHH_t'
+
+#read segy
+Flow([File, File+'_hdr', File+'.asc', File+'.bin'], '1.sgy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+#bandpass
+Flow('bpss',File,'bandpass flo=5 fhi=600')
+
+#window data
+Flow('hmask', File+'_hdr', 'sfheadermath output=fldr|mask min=3')
+Flow('win_hdr',[File+'_hdr', 'hmask'],'sfheaderwindow mask=${SOURCES[1]}')
+
+#trace Balance
+prog = Program('trace_balance.c')
+Flow('shots',['bpss', 'win_hdr', '%s' % prog[0], 'hmask'],'''window max1=1.0 | headerwindow mask=${SOURCES[3]} |intbin head=${SOURCES[1]} xk=tracf yk=fldr
+      | ./${SOURCES[2]} mbal=1''')
+
+#FK analysis
+# step1 Select one shot (fldr)
+v1=1.45
+v2=1.61
+Flow('oneshot','shots','''window n3=1 min3=300 squeeze=n''')
+Plot('oneshot',' window max1=0.5 | grey color=seismic title="Selected Shot" pclip=96')
+
+Flow('fft','oneshot','put d2=0.003125|fft1 | fft3')
+Plot('fft',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey allpos=y color=spectral title="FFT" 
+       ''')
+
+Flow('dipfilter', 'fft', 'sfdipfilter v1=%.3f v2=%.3f v3=%.3f v4=%.3f pass=n' % (-v2, -v1, v1, v2))
+Plot('dipfilter',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey color=spectral allpos=y title="Filtered" 
+       ''')
+Result('fk','fft dipfilter','SideBySideAniso')
+
+Flow('signal','dipfilter','fft3 inv=y | fft1 inv=y')
+Plot('signal',' window max1=0.5 | grey color=seismic title=Signal pclip=96')
+
+Flow('noise','oneshot signal','add scale=1,-1 ${SOURCES[1]}')
+Plot('noise',' window max1=0.5 | grey color=seismic title=Noise pclip=96')
+
+Result('fkcp','oneshot signal noise','SideBySideAniso')
+
+#FK apply all data
+Flow('ffts','shots','put d2=0.003125|fft1 | fft3')
+Flow('fshots', 'ffts', 'sfdipfilter v1=%.3f v2=%.3f v3=%.3f v4=%.3f pass=n |fft3 inv=y | fft1 inv=y|put d2=1' % (-v2, -v1, v1, v2))
+
+#near offset section view ch3
+Flow('ch3','fshots','window n2=1 f2=3')
+
+#caculate cdp
+Flow('cdp','win_hdr','''headermath key=cdp output=8*fldr+tracf-5''')
+# Extract CMPs and apply t^2 gain
+Flow('rshots',['fshots','cdp'],
+     '''
+      intbin head=${SOURCES[1]} inv=y 
+      xk=tracf yk=fldr                   | 
+      pow pow1=1.4     
+      ''')
+Flow('cmps',['rshots','cdp'],'intbin head=${SOURCES[1]} xk=tracf yk=cdp')
+
+Flow('cmask','cmps','mul $SOURCE | stack axis=1 | mask min=1e-10')
+
+Result('cmask',
+       '''
+       dd type=float |
+       stack axis=1 norm=n |
+       graph symbol=x title="NHH"
+       label2="Traces per CMP Gather"
+       label1="CMP Gather Number" unit1=
+       ''')
+
+Flow('getoff','cdp','''headermath output=tracf|dd type=float |math output="12.5+3.125*(input-1)" ''')
+
+Flow('offs',['getoff','cdp'],
+     '''
+     intbin xk=tracf yk=cdp head=${SOURCES[1]}
+     ''')
+
+# Examine one CMP gather
+
+Flow('mask1','cmask','window n2=1 min2=1280')
+
+Flow('cmp1','cmps mask1',
+     '''
+     window n3=1 min3=1280 | headerwindow mask=${SOURCES[1]}
+     ''')
+
+Flow('off','offs mask1',
+     '''
+     window n3=1 min3=1280 squeeze=n | headerwindow mask=${SOURCES[1]}
+     ''')
+
+Result('cmp1','cmp1 off',
+     '''
+     wiggle xpos=${SOURCES[1]} title="CMP 1280"
+     yreverse=y transp=y poly=y label2=Offset unit2=m
+     wherexlabel=t wheretitle=b
+     ''')
+
+Plot('cmp1','cmp1 off',
+     '''
+     wiggle xpos=${SOURCES[1]} title="CMP 1280"
+     yreverse=y transp=y poly=y label2=Offset unit2=m
+     wherexlabel=t wheretitle=b
+     ''')
+
+#make velocity
+#tnmo=(0.01, 0.158261, 0.262609, 0.375652, 0.511304, 0.8,0.966957)
+#vnmo=(1503.00, 1551.24, 1638.59, 1759.84, 1912.39, 2031.03, 2114.47)
+
+tnmo=(0.01, 0.158261, 0.262609, 0.375652, 0.511304, 0.8,0.966957)
+vnmo=(1503.00, 1551.24, 1580.59, 1659.84, 1712.39, 1831.03, 1900.47)
+
+Flow('vnmo.asc',None,
+     '''
+     echo %s n1=%d n2=2 data_format=ascii_float in=$TARGET
+     ''' % (' '.join(map(str,tnmo)+map(str,vnmo)),len(tnmo)))
+
+Flow('vnmo','vnmo.asc cmps',
+     'dd form=native | linear pattern=${SOURCES[1]} rect=5 niter=100')
+ 
+Result('vnmo','graph title="NMO Velocity" label1=Time unit1=s label2=Velocity unit2=m/s')
+
+Flow('vel','vnmo','spray axis=2 n=3968')
+
+Flow('nmos','cmps offs cmask vel',
+     '''
+     nmo half=n offset=${SOURCES[1]} mask=${SOURCES[2]}
+     velocity=${SOURCES[3]} mutter v0=15000
+     ''')
+
+Flow('stack','nmos','stack')
+
+Result('stack','grey color=seismic title="NMO Stack" label2="CMP Number" ')
+
+Plot('stack','window min1=5.5 max1=8.5 | grey title="NMO Stack" label2="CMP Number" ')

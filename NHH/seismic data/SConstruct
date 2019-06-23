@@ -1,0 +1,43 @@
+from rsf.proj import *
+
+File = 'NHH_t'
+numofslice = 48
+Flow([File, File+'_hdr', File+'.asc', File+'.bin'], '1.sgy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+
+#graph title="Average Spectra" grid1=y grid2=y min1=0 max1=150 max2=0.2 label2=Amp screenratio=0.4
+# Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfwiggle  screenht=15.0 screenratio=1.5 transp=y yreverse=y plotcol=7 
+# 	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+# 	labelsz=4. wheretitle=bottom titlesz=8.0''')| scale axis=1
+
+Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfwiggle perc=99 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+	labelsz=4. wheretitle=bottom titlesz=8.0''')
+#Result('area_spec',File,'''window min2=1 max2=64 max1=0.8|sfagc rect1=100|sfgrey color=seismic screenratio=3.5''')
+
+Result('spectra_raw',File,
+       '''window min2=1 max2=64 max1=0.8|spectra all=y|scale axis=1|graph title="Average Spectra" plotfat=2 grid1=y 
+       griddash=2 grid2=y min1=0 min2=0 max1=1000 label2=Amp screenratio=0.4''')
+
+Result('area_spec_f',File,'''window min2=1 max2=64 max1=0.8|bandpass flo=5|agc rect1=100|sfwiggle perc=99 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+	title="shot" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+	labelsz=4. wheretitle=bottom titlesz=8.0''')
+
+Result('spectra_f',File,
+       '''window min2=1 max2=64 max1=0.8|bandpass flo=5|spectra all=y|scale axis=1| graph title="Average Spectra" plotfat=2 grid1=y 
+       griddash=2 grid2=y min1=0 min2=0 max1=1000 label2=Amp screenratio=0.4''')
+
+#badndpass and sort the shot , window the data, gain the data
+Flow('bpss',File,'bandpass flo=5')
+Flow('shots',['bpss', File+'_hdr'],'''intbin head=${SOURCES[1]} xk=tracf yk=fldr|put d2=3.125 o2=12.5 unit2='m' label2='offset'
+	 d3=12.5 03=0.0 unit3='m' |window f3=3 max1=1.0|pow pow1=1.4''')
+#first look
+for i in range(numofslice):
+	num = (i + 1) * 10
+	Result(str(num), 'shots', '''window n3=1 min3=%g|sfwiggle pclip=96 poly=y screenht=15.0 screenratio=2.5 transp=y yreverse=y plotcol=7 
+		title="shot num %g" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+		labelsz=4. wheretitle=bottom titlesz=8.0''' % (num, num))
+
+#near offset section view ch3
+Flow('ch3','shots','window n2=1 f2=3')
+Plot('ch3', '''grey pclip=96 color=seismic title="Chanel 3 Offset section" ''')

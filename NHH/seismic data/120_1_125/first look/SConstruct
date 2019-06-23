@@ -1,0 +1,109 @@
+from rsf.proj import *
+
+File = 'NHH_t'
+numofslice = 2
+
+#read segy
+Flow([File, File+'_hdr', File+'.asc', File+'.bin'], '../1.sgy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+#bandpass, and apply t^2 gain
+Flow('bpss',File,'window max1=1.0 | bandpass flo=5 fhi=600|pow pow1=1.4')
+
+# concatenate shot files
+#Flow('rshots',parts,'cat axis=3 ${SOURCES[1:%d]}' % len(parts))
+
+# concatenate header files
+#Flow('tshots',tparts,'cat axis=2 ${SOURCES[1:%d]}' % len(tparts))
+
+
+# for n in range(403,413):
+#         # to run locally use this Fetch and inp.  To run on stampede I logonto a computer
+#         # that had the data and ran:
+#         # rcp cant12.*.segy karls@stampede.tacc.utexas.edu:/work/02167/karls/data/cant12/fetch
+        
+# # inp = 'cant12.%d.segy' % n
+# # Fetch(inp,'cant12',server='http://s3.amazonaws.com',top='open.source.geoscience/open_data')
+        
+# # inp = '/work/02167/karls/data/cant12/fetch/cant12.%d.segy' % n
+
+#         out = 'cant12-%d' % n
+
+#         Flow([out,'t'+out,out+'.asc',out+'.bin'],inp,
+#              'segyread tfile=${TARGETS[1]} hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+#trace Balance
+prog = Program('trace_balance.c')
+Flow('shots',['bpss', File+'_hdr', '%s' % prog[0]],'''intbin head=${SOURCES[1]} xk=tracf yk=fldr
+      | ./${SOURCES[2]} mbal=1''')
+
+#FK analysis
+# step1 Select one shot (fldr)
+v1=1.45
+v2=1.61
+Flow('oneshot','shots','''window n3=1 min3=300 squeeze=n''')
+Plot('oneshot',' window max1=0.5 | grey color=seismic title="Selected Shot" pclip=96')
+
+Flow('fft','oneshot','put d2=0.003125|fft1 | fft3')
+Plot('fft',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey allpos=y color=spectral title="FFT" 
+       ''')
+
+Flow('dipfilter', 'fft', 'sfdipfilter v1=%.3f v2=%.3f v3=%.3f v4=%.3f pass=n' % (-v2, -v1, v1, v2))
+Plot('dipfilter',
+       '''
+       window max1=250 | math output="abs(input)" | 
+       real | grey color=spectral allpos=y title="Filtered" 
+       ''')
+Result('fk','fft dipfilter','SideBySideAniso')
+
+Flow('signal','dipfilter','fft3 inv=y | fft1 inv=y')
+Plot('signal',' window max1=0.5 | grey color=seismic title=Signal pclip=96')
+
+Flow('noise','oneshot signal','add scale=1,-1 ${SOURCES[1]}')
+Plot('noise',' window max1=0.5 | grey color=seismic title=Noise pclip=96')
+
+Result('fkcp','oneshot signal noise','SideBySideAniso')
+
+#FK apply all data
+Flow('ffts','shots','put d2=0.003125|fft1 | fft3')
+Flow('fshots', 'ffts', 'sfdipfilter v1=%.3f v2=%.3f v3=%.3f v4=%.3f pass=n |fft3 inv=y | fft1 inv=y|put d2=1' % (-v2, -v1, v1, v2))
+
+
+# #print shot
+# for i in range(numofslice):
+#   num = (i + 1) * 10
+#   Result(str(num), 'fshots', '''window n3=1 min3=%g|sfwiggle pclip=96 poly=y screenht=12.0 screenratio=2.2 transp=y yreverse=y plotcol=7 
+#     title="shot num %g" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+#     labelsz=4. wheretitle=bottom titlesz=8.0''' % (num, num))
+
+#print shot
+for i in range(numofslice):
+  num = (i + 1) * 10
+  Result(str(num), 'shots', '''window n3=1 min3=%g|sfwiggle pclip=96 poly=y screenht=12.0 screenratio=2.2 transp=y yreverse=y plotcol=7 
+    title="shot num %g" plotfat=0.4 grid2=y griddash=3 gridcol=7 g2num=0.4 wherexlabel=top 
+    labelsz=4. wheretitle=bottom titlesz=8.0''' % (num, num))
+
+#near offset section view ch3
+Flow('ch3','fshots','window n2=1 f2=3')
+
+#caculate cdp
+Flow('cdp',File+'_hdr','''headermath key=cdp output=8*fldr+tracf-5''')
+# Extract CMPs 
+Flow('rshots',['fshots','cdp'],
+     '''
+      intbin head=${SOURCES[1]} inv=y 
+      xk=tracf yk=fldr
+      ''')
+Flow('cmps',['rshots','cdp'],'intbin head=${SOURCES[1]} xk=tracf yk=cdp')
+
+Flow('cmask','cmps','mul $SOURCE | stack axis=1 | mask min=1e-10')
+
+Result('cmask',
+       '''
+       dd type=float |
+       stack axis=1 norm=n |
+       graph symbol=x title="NHH"
+       label2="Traces per CMP Gather"
+       label1="CMP Gather Number" unit1=
+       ''')

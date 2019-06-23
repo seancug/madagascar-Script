@@ -1,0 +1,11 @@
+from rsf.suproj import *
+
+#read segyfile
+file='NHH_t'
+Flow([file, file + 'bin', file + 'asci'], 
+	'../'+'1.sgy','''segyread
+	bfile=${TARGETS[1]} hfile=${TARGETS[2]} 
+	tape=${SOURCE}''', stdin=0)
+Flow('filter', file, '''sufilter f=5,10,600,630 amps=0,1,1,0''')
+Flow('gain_m','filter','sugain  maxbal=1')
+End()

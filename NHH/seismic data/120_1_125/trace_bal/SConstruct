@@ -1,0 +1,19 @@
+from rsf.proj import *
+
+File = 'NHH_t'
+numofslice = 48
+Flow([File, File+'_hdr', File+'.asc', File+'.bin'], '../1.sgy',
+	 'sfsegyread tfile=${TARGETS[1]}  hfile=${TARGETS[2]} bfile=${TARGETS[3]}')
+
+Flow('bpss',File,'bandpass flo=5 fhi=600')
+
+Flow('shots',['bpss', File+'_hdr'],'''intbin head=${SOURCES[1]} xk=tracf yk=fldr|put d2=3.125 o2=12.5 unit2='m' label2='offset'
+	 d3=12.5 03=0.0 unit3='m' |window f3=3 max1=1.0''')
+
+#trace Balance
+prog = Program('trace_balance.c')
+
+Flow('trac_b', 'shots %s' % prog[0], '''./${SOURCES[1]} mbal=1''')
+# Flow('bp.sgy',['bpss',File+'_hdr', File+'.asc', File+'.bin'],'''segywrite 
+# 	tfile=${SOURCES[1]}  hfile=${SOURCES[2]} bfile=${SOURCES[3]}''')
+End()
